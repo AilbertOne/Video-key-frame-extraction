@@ -1,0 +1,119 @@
+filenames=dir('images/*.jpg'); % 文件夹路径
+%file_name = fly-1;
+num=size(filenames,1);  %输出filenames中文件图片的个数
+key=zeros(1,num);  %一行，num列都是0  [0,0,0,0,0,0,0,0,0,0,0,0,....0,0,0,0]
+cluster=zeros(1,num);   %[0,0,0,0,0,0,0,0,0,0,0,0,....0,0,0,0]
+clusterCount=zeros(1,num);  %各聚类有的帧数   [0,0,0,0,0,0,0,0,0,0,0,0,....0,0,0,0]
+count=0;        %聚类的个数    
+ 
+%threshold=0.75;  %阈值越大帧越多
+%airplane这个视频阈值设为0.93比较合适   0.95更好
+%********************************************************阈值**************************************************************%
+threshold=0.91;  %阈值
+centrodR=zeros(num,256);   %聚类质心R的直方图   第一帧图片256个初始化全部为0，第二帧也是，其余帧都是  %%%后面相似度大加入一帧后会对其进行调整
+centrodG=zeros(num,256);   %聚类质心G的直方图
+centrodB=zeros(num,256);   %聚类质心B的直方图
+ 
+if num==0
+    error('Sorry, there is no pictures in images folder!');
+else
+    %令首帧形成第一个聚类
+    img=imread(strcat('images/',filenames(1).name));
+    count=count+1;    %产生第一个聚类
+    [preCountR,x]=imhist(img(:,:,1));   %red histogram    得到红色的直方图一共256个数值，每个数值有多少作为直方图的高度
+    [preCountG,x]=imhist(img(:,:,2));   %green histogram
+    [preCountB,x]=imhist(img(:,:,3));   %blue histogram
+    
+    cluster(1)=1;   %设定第一个聚类选取的关键帧初始为首帧  cluster变为了（1,0,0,0,0,......,0,0,0）cluster(1)是改变了第一个元素
+    clusterCount(1)=clusterCount(1)+1;%clusterCount(1)为0，加1，变为1,最终 clusterCount(1)为[1,0,0,0,.....,0,0,0]
+    centrodR(1,:)=preCountR; % centrodR本来是num（帧个数）行，256列，全部为0.。现在第一行为第一帧的红色直方图各个数值的高度
+    centrodG(1,:)=preCountG;
+    centrodB(1,:)=preCountB;
+   
+    visit = 1;
+    for k=2:num
+        img=imread(strcat('images/',filenames(k).name));  %循环读取每一帧，首先是第2帧
+        [tmpCountR,x]=imhist(img(:,:,1));   %red histogram  得到红色分量直方图  第二幅图片的红色直方图
+        [tmpCountG,x]=imhist(img(:,:,2));   %green histogram
+        [tmpCountB,x]=imhist(img(:,:,3));   %blue histogram
+ 
+        clusterGroupId=1;  %新定义的一个变量clusterGroupId为1
+        maxSimilar=0;   %新定义，相似度
+    
+       
+        for clusterCountI= visit:count          %目前 count为1   定义新变量clusterCountI  I来确定这一帧归属于第一个聚类还是第二个聚类
+            sR=0;
+            sG=0;
+            sB=0;
+            %运用颜色直方图法的差别函数
+            for j=1:256
+                sR=min(centrodR(clusterCountI,j),tmpCountR(j))+sR;%，j从1到256，第一帧中R的所有值256个亮度  以及第二帧的红色直方图所有高度值  进行比较选最小的
+                sG=min(centrodG(clusterCountI,j),tmpCountG(j))+sG;
+                sB=min(centrodB(clusterCountI,j),tmpCountB(j))+sB;
+            end
+            dR=sR/sum(tmpCountR);
+            dG=sG/sum(tmpCountG);
+            dB=sB/sum(tmpCountB);
+            %YUV,persons are sensitive to Y
+            d=0.30*dR+0.59*dG+0.11*dB;  %运用颜色直方图法的差别函数  定义了d  差别函数
+            if d>maxSimilar
+                clusterGroupId=clusterCountI;
+                maxSimilar=d;
+            end
+        end
+        
+        if maxSimilar>threshold
+            %相似度大，与该聚类质心距离小
+            %加入该聚类，并调整质心
+            for ii=1:256    
+                centrodR(clusterGroupId,ii)=centrodR(clusterGroupId,ii)*clusterCount(clusterGroupId)/(clusterCount(clusterGroupId)+1)+tmpCountR(ii)*1.0/(clusterCount(clusterGroupId)+1);
+                centrodG(clusterGroupId,ii)=centrodG(clusterGroupId,ii)*clusterCount(clusterGroupId)/(clusterCount(clusterGroupId)+1)+tmpCountG(ii)*1.0/(clusterCount(clusterGroupId)+1);
+                centrodB(clusterGroupId,ii)=centrodB(clusterGroupId,ii)*clusterCount(clusterGroupId)/(clusterCount(clusterGroupId)+1)+tmpCountB(ii)*1.0/(clusterCount(clusterGroupId)+1);
+            end
+            clusterCount(clusterGroupId)=clusterCount(clusterGroupId)+1;
+            cluster(k)=clusterGroupId;   %第k帧在第clusterGroupId个聚类里面   cluster(3)等于1或者2，，也就是属于第一个聚类或者第二个聚类
+        else
+            %形成新的聚类，增加一个聚类质心
+            count=count+1;
+             visit = visit+1;
+            clusterCount(count)=clusterCount(count)+1;
+            centrodR(count,:)=tmpCountR;
+            centrodG(count,:)=tmpCountG;
+            centrodB(count,:)=tmpCountB;
+            cluster(k)=count;   %第k帧在第count个聚类里面   否则 cluster(k)就在新建的聚类中
+        end
+    end
+    
+    %至此，所有帧都划进相应的聚类，一共有count个聚类，第k帧在第cluster(k)聚类中
+    %现欲取出每个聚类中离质心距离最近，即相似度最大的作为该聚类的关键帧
+    maxSimilarity=zeros(1,count);
+    frame=zeros(1,count);
+    for i=1:num
+        sR=0;
+        sG=0;
+        sB=0;
+        %运用颜色直方图法的差别函数
+        for j=1:256
+            sR=min(centrodR(cluster(i),j),tmpCountR(j))+sR;%每一帧和聚类质心进行比较，取最小值 
+            sG=min(centrodG(cluster(i),j),tmpCountG(j))+sG;
+            sB=min(centrodB(cluster(i),j),tmpCountB(j))+sB;
+        end
+        dR=sR/sum(tmpCountR);
+        dG=sG/sum(tmpCountG);
+        dB=sB/sum(tmpCountB);
+        %YUV,persons are sensitive to Y
+        d=0.30*dR+0.59*dG+0.11*dB;
+        if d>maxSimilarity(cluster(i))
+            maxSimilarity(cluster(i))=d;
+            frame(cluster(i))=i;
+        end
+    end
+    
+    for j=1:count
+        key(frame(j))=1;
+        figure(j);
+        imshow(strcat('images/',filenames(frame(j)).name));
+    end
+end
+ 
+keyFrameIndexes=find(key)
